@@ -1,0 +1,248 @@
+{
+    "$schema": "http://schema.management.azure.com/schemas/2014-04-01-preview/deploymentTemplate.json#",
+    "contentVersion": "1.0.0.0",
+    "parameters": {
+        "serviceBusNamespaceName": {
+            "defaultValue": "CXMADSync - this must be unique",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the Service Bus namespace - must be unique!"
+            }
+        },
+        "serviceBusQueueName": {
+            "defaultValue": "admsgqueue",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the Queue"
+            }
+        },
+        "mgrAuthRuleName": {
+            "defaultValue": "queuemanager",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the manager AuthorisationRule"
+            }
+        },
+        "writerAuthRuleName": {
+            "defaultValue": "queuewriter",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the writer AuthorisationRule"
+            }
+        },
+        "readerAuthRuleName": {
+            "defaultValue": "queuereader",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the reader AuthorisationRule"
+            }
+        },
+        "storageAccountName": {
+            "defaultValue": "facxmadsync",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the storage account"
+            }
+        },
+        "functionAppName": {
+            "defaultValue": "FunctionAppCxMAdSyncFunction",
+            "type": "String",
+            "metadata": {
+                "description": "Name of the function app"
+            }
+        }
+    },
+    "variables": {
+        "readerAuthRuleResourceId": "[resourceId('Microsoft.ServiceBus/namespaces/queues/authorizationRules', parameters('serviceBusNamespaceName'), parameters('serviceBusQueueName'), parameters('readerAuthRuleName'))]",
+        "writerAuthRuleResourceId": "[resourceId('Microsoft.ServiceBus/namespaces/queues/authorizationRules', parameters('serviceBusNamespaceName'), parameters('serviceBusQueueName'), parameters('writerAuthRuleName'))]",
+        "mgrAuthRuleResourceId": "[resourceId('Microsoft.ServiceBus/namespaces/queues/authorizationRules', parameters('serviceBusNamespaceName'), parameters('serviceBusQueueName'), parameters('mgrAuthRuleName'))]",
+        "sbVersion": "2017-04-01",
+        "FAAppName": "[parameters('functionAppname')]",
+        "hostingPlanName": "[parameters('functionAppname')]",
+        "storageAccountName": "[concat(uniquestring(resourceGroup().id), 'functions')]"
+    },
+    "resources": [
+        {
+            "type": "Microsoft.ServiceBus/namespaces",
+            "sku": {
+                "name": "Basic",
+                "tier": "Basic"
+            },
+            "name": "[parameters('serviceBusNamespaceName')]",
+            "apiVersion": "2017-04-01",
+            "location": "[resourceGroup().location]",
+            "properties": {},
+            "resources": [{
+                "type": "Queues",
+                "name": "[parameters('serviceBusQueueName')]",
+                "apiVersion": "2017-04-01",
+                "properties": {
+                    "lockDuration": "PT30S",
+                    "maxSizeInMegabytes": 1024,
+                    "requiresDuplicateDetection": false,
+                    "requiresSession": false,
+                    "defaultMessageTimeToLive": "P14D",
+                    "deadLetteringOnMessageExpiration": false,
+                    "enableBatchedOperations": true,
+                    "duplicateDetectionHistoryTimeWindow": "PT10M",
+                    "maxDeliveryCount": 1,
+                    "status": "Active",
+                    "enablePartitioning": true,
+                    "enableExpress": false
+                },
+                "resources": [{
+                        "type": "AuthorizationRules",
+                        "name": "[parameters('writerAuthRuleName')]",
+                        "apiVersion": "2017-04-01",
+                        "properties": {
+                            "rights": [
+                                "Send"
+                            ]
+                        },
+                        "dependsOn": [
+                            "[parameters('serviceBusQueueName')]"
+                        ]
+                    },
+                    {
+                        "type": "AuthorizationRules",
+                        "name": "[parameters('readerAuthRuleName')]",
+                        "apiVersion": "2017-04-01",
+                        "properties": {
+                            "rights": [
+                                "Listen"
+                            ]
+                        },
+                        "dependsOn": [
+                            "[parameters('serviceBusQueueName')]",
+                            "[parameters('writerAuthRuleName')]"
+                        ]
+                    },
+                    {
+                        "type": "AuthorizationRules",
+                        "name": "[parameters('mgrAuthRuleName')]",
+                        "apiVersion": "2017-04-01",
+                        "properties": {
+                            "rights": [
+                                "Manage",
+                                "Listen",
+                                "Send"
+                            ]
+                        },
+                        "dependsOn": [
+                            "[parameters('serviceBusQueueName')]",
+                            "[parameters('readerAuthRuleName')]"
+                        ]
+                    }
+                ],
+                "dependsOn": [
+                    "[concat('Microsoft.ServiceBus/namespaces/', parameters('serviceBusNamespaceName'))]"
+                ]
+            }]
+        },
+        {
+            "type": "Microsoft.Storage/storageAccounts",
+            "name": "[variables('storageAccountName')]",
+            "apiVersion": "2018-03-01-preview",
+            "location": "[resourceGroup().location]",
+            "kind": "Storage",
+            "sku": {
+                "name": "Standard_LRS",
+                "tier": "Standard"
+            },
+            "properties": {
+                "networkAcls": {
+                    "bypass": "AzureServices",
+                    "virtualNetworkRules": [],
+                    "ipRules": [],
+                    "defaultAction": "Allow"
+                },
+                "supportsHttpsTrafficOnly": false,
+                "encryption": {
+                    "services": {
+                        "file": {
+                            "enabled": true
+                        },
+                        "blob": {
+                            "enabled": true
+                        }
+                    },
+                    "keySource": "Microsoft.Storage"
+                }
+            }
+        },
+        {
+            "type": "Microsoft.Web/serverfarms",
+            "sku": {
+                "name": "Y1",
+                "tier": "Dynamic",
+                "size": "Y1",
+                "family": "Y",
+                "capacity": 0
+            },
+            "kind": "functionapp",
+            "apiVersion": "2016-09-01",
+            "name": "[variables('hostingPlanName')]",
+            "location": "[resourceGroup().location]",
+            "properties": {
+                "name": "[variables('hostingPlanName')]",
+                "workerTierName": null,
+                "adminSiteName": null,
+                "hostingEnvironmentProfile": null,
+                "perSiteScaling": false,
+                "reserved": false,
+                "targetWorkerCount": 0,
+                "targetWorkerSizeId": 0
+            }
+        },
+        {
+            "apiVersion": "2015-04-01",
+            "type": "Microsoft.Web/sites",
+            "name": "[variables('FAAppName')]",
+            "location": "[resourceGroup().location]",
+            "kind": "functionapp",
+            "properties": {
+                "enabled": true,
+                "serverFarmId": "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                "reserved": false,
+                "siteConfig": null,
+                "scmSiteAlsoStopped": false,
+                "hostingEnvironmentProfile": null,
+                "clientAffinityEnabled": true,
+                "clientCertEnabled": false,
+                "hostNamesDisabled": false,
+                "containerSize": 1536,
+                "dailyMemoryTimeQuota": 0,
+                "cloningInfo": null
+            },
+            "dependsOn": [
+                "[resourceId('Microsoft.Web/serverfarms', variables('hostingPlanName'))]",
+                "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+            ],
+            "resources": [{
+                "apiVersion": "2016-03-01",
+                "name": "appsettings",
+                "type": "config",
+                "dependsOn": [
+                    "[resourceId('Microsoft.Web/sites', variables('FAAppName'))]",
+                    "[resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName'))]"
+                ],
+                "properties": {
+                    "AzureWebJobsStorage": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listkeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2015-05-01-preview').key1,';')]",
+                    "AzureWebJobsDashboard": "[concat('DefaultEndpointsProtocol=https;AccountName=',variables('storageAccountName'),';AccountKey=',listkeys(resourceId('Microsoft.Storage/storageAccounts', variables('storageAccountName')), '2015-05-01-preview').key1,';')]"
+                }
+            }
+        ]}],
+            "outputs": {
+                "mgrSharedAccessPolicyPrimaryKey": {
+                    "type": "String",
+                    "value": "[listkeys(variables('mgrAuthRuleResourceId'), variables('sbVersion')).primaryKey]"
+                },
+                "writerSharedAccessPolicyPrimaryKey": {
+                    "type": "String",
+                    "value": "[listkeys(variables('writerAuthRuleResourceId'), variables('sbVersion')).primaryKey]"
+                },
+                "readerSharedAccessPolicyPrimaryKey": {
+                    "type": "String",
+                    "value": "[listkeys(variables('readerAuthRuleResourceId'), variables('sbVersion')).primaryKey]"
+                }
+}}
